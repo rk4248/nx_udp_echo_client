@@ -58,6 +58,8 @@ ETH_HandleTypeDef heth;
 I2S_HandleTypeDef hi2s3;
 DMA_HandleTypeDef hdma_spi3_tx;
 
+TIM_HandleTypeDef htim7;
+
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
@@ -71,6 +73,7 @@ static void MX_DMA_Init(void);
 static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_I2S3_Init(void);
+static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -105,6 +108,7 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
   BSP_LED_Init(LED_GREEN);
+  BSP_LED_Init(LED_BLUE);
   BSP_LED_Init(LED_RED);
   /* USER CODE END SysInit */
 
@@ -114,8 +118,10 @@ int main(void)
   MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_I2S3_Init();
+  MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
 
+  HAL_TIM_Base_Start_IT(&htim7);
   /* USER CODE END 2 */
 
   MX_ThreadX_Init();
@@ -269,6 +275,44 @@ static void MX_I2S3_Init(void)
 }
 
 /**
+  * @brief TIM7 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM7_Init(void)
+{
+
+  /* USER CODE BEGIN TIM7_Init 0 */
+
+  /* USER CODE END TIM7_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM7_Init 1 */
+
+  /* USER CODE END TIM7_Init 1 */
+  htim7.Instance = TIM7;
+  htim7.Init.Prescaler = 90;
+  htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim7.Init.Period = 24999;
+  htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim7, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM7_Init 2 */
+
+  /* USER CODE END TIM7_Init 2 */
+
+}
+
+/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -383,7 +427,10 @@ void Success_Handler(void)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-
+	if (htim->Instance == TIM7) {
+	  //  HAL_GPIO_TogglePin(LED2_GPIO_PORT, LED2_PIN);
+		BSP_LED_Toggle(LED_BLUE);
+	  }
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6) {
     HAL_IncTick();
