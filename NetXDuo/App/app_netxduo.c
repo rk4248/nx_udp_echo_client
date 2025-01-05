@@ -81,7 +81,7 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
   /* USER CODE END MX_NetXDuo_MEM_POOL */
 
   /* USER CODE BEGIN MX_NetXDuo_Init */
- printf("\n\r\t\t\tNxUDPClient application started\n\r");
+ printf("\n\r\t\t\tNx UDP Client application started\n\r");
 
   /* Allocate the memory for packet_pool.  */
   if (tx_byte_allocate(byte_pool, (VOID **) &pointer,  NX_PACKET_POOL_SIZE, TX_NO_WAIT) != TX_SUCCESS)
@@ -253,6 +253,9 @@ static VOID App_Main_Thread_Entry(ULONG thread_input)
   {
     Error_Handler();
   }
+extern TIM_HandleTypeDef htim7;
+  HAL_TIM_Base_Start_IT(&htim7);
+
   /* the network is correctly initialized, start the UDP thread */
   tx_thread_resume(&AppUDPThread);
 

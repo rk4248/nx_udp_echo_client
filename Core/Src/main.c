@@ -121,7 +121,7 @@ int main(void)
   MX_TIM7_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_TIM_Base_Start_IT(&htim7);
+
   /* USER CODE END 2 */
 
   MX_ThreadX_Init();
