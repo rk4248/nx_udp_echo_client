@@ -45,6 +45,9 @@
 TX_THREAD AppMainThread;
 TX_THREAD AppUDPThread;
 TX_THREAD AppLinkThread;
+
+TX_THREAD IPStatistic;
+
 TX_SEMAPHORE Semaphore;
 
 NX_PACKET_POOL AppPool;
@@ -62,9 +65,13 @@ CHAR *pointer;
 /* USER CODE BEGIN PFP */
 static VOID App_Main_Thread_Entry(ULONG thread_input);
 static VOID App_UDP_Thread_Entry(ULONG thread_input);
+static VOID App_UDP_Client_Thread_Entry(ULONG thread_input);
 static VOID App_Link_Thread_Entry(ULONG thread_input);
 
 static VOID ip_address_change_notify_callback(NX_IP *ip_instance, VOID *ptr);
+
+void IP_Statiscitc_Thread(ULONG thread_input);
+
 /* USER CODE END PFP */
 /**
   * @brief  Application NetXDuo Initialization.
@@ -105,8 +112,12 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
   }
 
   /* Create the main NX_IP instance */
-  ret = nx_ip_create(&IpInstance, "Main Ip instance", NULL_ADDRESS, NULL_ADDRESS, &AppPool, nx_stm32_eth_driver,
-                     pointer, 2 * DEFAULT_MEMORY_SIZE, DEFAULT_PRIORITY);
+//  ret = nx_ip_create(&IpInstance, "Main Ip instance", NULL_ADDRESS, NULL_ADDRESS, &AppPool, nx_stm32_eth_driver,
+//                     pointer, 2 * DEFAULT_MEMORY_SIZE, DEFAULT_PRIORITY);
+
+  ret = nx_ip_create(&IpInstance, "Main Ip instance", IP_ADDRESS(192,168,88,81), IP_ADDRESS(255,255,255,0), &AppPool, nx_stm32_eth_driver,
+                      pointer, 2 * DEFAULT_MEMORY_SIZE, DEFAULT_PRIORITY);
+
 
   if (ret != NX_SUCCESS)
   {
@@ -159,7 +170,7 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
     return TX_POOL_ERROR;
   }
   /* create the UDP client thread */
-  ret = tx_thread_create(&AppUDPThread, "App UDP Thread", App_UDP_Thread_Entry, 0, pointer, 2 * DEFAULT_MEMORY_SIZE,
+  ret = tx_thread_create(&AppUDPThread, "App UDP Thread", App_UDP_Client_Thread_Entry, 0, pointer, 2 * DEFAULT_MEMORY_SIZE,
                          DEFAULT_PRIORITY, DEFAULT_PRIORITY, TX_NO_TIME_SLICE, TX_DONT_START);
 
   if (ret != TX_SUCCESS)
@@ -193,6 +204,24 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
   /* set DHCP notification callback  */
 
   tx_semaphore_create(&Semaphore, "DHCP Semaphore", 0);
+
+
+
+
+  /* Allocate the memory for statisctic out thread   */
+   if (tx_byte_allocate(byte_pool, (VOID **) &pointer,2 *  DEFAULT_MEMORY_SIZE / 2, TX_NO_WAIT) != TX_SUCCESS)
+   {
+     return TX_POOL_ERROR;
+   }
+
+   /* create the Statistic thread */
+   ret = tx_thread_create(&IPStatistic, "IP Statistic Thread", IP_Statiscitc_Thread, 0, pointer, 2 * DEFAULT_MEMORY_SIZE, \
+		   DEFAULT_MAIN_PRIORITY + 5, DEFAULT_MAIN_PRIORITY +5 , TX_NO_TIME_SLICE, TX_AUTO_START);
+
+   if (ret != TX_SUCCESS)
+   {
+     return NX_NOT_ENABLED;
+   }
 
   /* USER CODE END MX_NetXDuo_Init */
 
@@ -231,18 +260,18 @@ static VOID App_Main_Thread_Entry(ULONG thread_input)
     Error_Handler();
   }
 
-  /* start the DHCP client */
-  ret = nx_dhcp_start(&DHCPClient);
-  if (ret != NX_SUCCESS)
-  {
-    Error_Handler();
-  }
-
-  /* wait until an IP address is ready */
-  if(tx_semaphore_get(&Semaphore, TX_WAIT_FOREVER) != TX_SUCCESS)
-  {
-    Error_Handler();
-  }
+//  /* start the DHCP client */
+//  ret = nx_dhcp_start(&DHCPClient);
+//  if (ret != NX_SUCCESS)
+//  {
+//    Error_Handler();
+//  }
+//
+//  /* wait until an IP address is ready */
+//  if(tx_semaphore_get(&Semaphore, TX_WAIT_FOREVER) != TX_SUCCESS)
+//  {
+//    Error_Handler();
+//  }
   /* get IP address */
   ret = nx_ip_address_get(&IpInstance, &IpAddress, &NetMask);
 
@@ -396,8 +425,8 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
           nx_ip_driver_direct_command(&IpInstance, NX_LINK_ENABLE,
                                       &actual_status);
           /* Restart DHCP Client. */
-          nx_dhcp_stop(&DHCPClient);
-          nx_dhcp_start(&DHCPClient);
+//          nx_dhcp_stop(&DHCPClient);
+//          nx_dhcp_start(&DHCPClient);
         }
       }
     }
@@ -415,14 +444,14 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-//2 kanaly po 2 bajty kazdy w ramce 48*2 probki (co 2 ms) = 48*2*2*2=384 bajty w paczce UDP
-#define AUDIO_TOTAL_BUF_SIZE	384*4
-uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//1536 bajtow
-uint8_t rd_enable;
+//2 kanaly po 2 bajty kazdy w ramce 48*4 probki (co 4 ms) = 48*2*2*4=768 bajty w paczce UDP
+#define AUDIO_TOTAL_BUF_SIZE	768*4
+uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//3072 bajtow
+volatile int8_t rd_enable = 0;
 void AddAudioData(UCHAR *stream, ULONG length)
 {
 	static uint32_t wr_ptr = 0;
-	static uint32_t rd_ptr = 0;
+	//static uint32_t rd_ptr = 0;
 	if(length)
 	{
 		wr_ptr += length;
@@ -431,12 +460,14 @@ void AddAudioData(UCHAR *stream, ULONG length)
 			wr_ptr =0;
 		}
 	}
+
 	if(rd_enable == 0U)
 	{
 		if(wr_ptr >= (AUDIO_TOTAL_BUF_SIZE / 2U))
 		{
 			//I2S3_START
-			//HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE);
+			extern I2S_HandleTypeDef hi2s3;
+			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE);
 			rd_enable = 1U;
 		}
 	}
@@ -445,8 +476,118 @@ void AddAudioData(UCHAR *stream, ULONG length)
 
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-	//HAL_GPIO_TogglePin(LD2_YELLOW_GPIO_Port, LD2_YELLOW_Pin);
-	//to uruchamia sie co 8 ms
+	 BSP_LED_Toggle(LED_BLUE);
 }
 
+
+
+
+
+UCHAR data_buffer[1500];
+static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
+{
+  UINT ret;
+  ULONG bytes_read;
+  UINT source_port;
+
+
+  ULONG source_ip_address;
+  NX_PACKET *data_packet;
+
+  /* create the UDP socket */
+  ret = nx_udp_socket_create(&IpInstance, &UDPSocket, "UDP Client Socket", NX_IP_NORMAL, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, QUEUE_MAX_SIZE);
+
+  if (ret != NX_SUCCESS)
+  {
+     Error_Handler();
+  }
+
+  /* bind the socket indefinitely on the required port */
+  ret = nx_udp_socket_bind(&UDPSocket, DEFAULT_PORT, TX_WAIT_FOREVER);
+
+  if (ret != NX_SUCCESS)
+  {
+     Error_Handler();
+  }
+  else
+  {
+    printf("UDP Client listening on PORT %d.. \n", DEFAULT_PORT);
+  }
+
+  uint32_t packetRxCnt = 0;
+  while(1)
+  {
+    TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
+
+    /* wait for data for 500 msec */
+    ret = nx_udp_socket_receive(&UDPSocket, &data_packet, 50);
+
+    if (ret == NX_SUCCESS)
+    {
+      /* data is available, read it into the data buffer */
+      nx_packet_data_retrieve(data_packet, data_buffer, &bytes_read);
+      /* get info about the client address and port */
+      nx_udp_source_extract(data_packet, &source_ip_address, &source_port);
+      /* print the client address, the remote port and the received data */
+      //PRINT_DATA(source_ip_address, source_port, data_buffer);
+
+      /* resend the same packet to the client */
+      //ret =  nx_udp_socket_send(&UDPSocket, data_packet, source_ip_address, source_port);
+
+      AddAudioData(data_packet, bytes_read);
+      nx_packet_release(data_packet);
+      /* toggle the green led to monitor visually the traffic */
+      //printf("%.5ld: Packet recv: %ld bytes\n\r",packetRxCnt++,bytes_read);
+      BSP_LED_Toggle(LED_GREEN);
+    }
+    else
+    {
+        /* the server is in idle state, toggle the green led */
+        BSP_LED_Toggle(LED_RED);
+    }
+  }
+}
+
+void IP_Statiscitc_Thread(ULONG thread_input)
+{
+	ULONG ip_total_packets_sent, ip_total_bytes_sent;
+	ULONG ip_total_packets_received, ip_total_bytes_received;
+	ULONG ip_invalid_packets, ip_receive_packets_dropped;
+	ULONG ip_receive_checksum_errors, ip_send_packets_dropped;
+	ULONG ip_total_fragments_sent, ip_total_fragments_received;
+
+	static ULONG pckRx = 0, bytRx = 0;
+	ULONG pckBytes;
+	UINT ret;
+
+	while(1)
+	{
+		ret =  nx_ip_info_get(&IpInstance, &ip_total_packets_sent, &ip_total_bytes_sent, \
+				&ip_total_packets_received, &ip_total_bytes_received, \
+				&ip_invalid_packets, &ip_receive_packets_dropped, \
+				&ip_receive_checksum_errors, &ip_send_packets_dropped, \
+				&ip_total_fragments_sent, &ip_total_fragments_received);
+
+		if(ret == NX_SUCCESS)
+		{
+			if( (ip_total_packets_received - pckRx) != 0)
+			{
+				pckBytes = (ip_total_bytes_received - bytRx) / (ip_total_packets_received - pckRx);
+			} else
+			{
+				pckBytes = 0;
+			}
+			pckRx = ip_total_packets_received;
+			bytRx = ip_total_bytes_received;
+			printf("PckTx: %ld  BytTx: %ld  PckRx: %ld  BytRx:%ld  Byt/Pck:%ld\n\r", \
+					ip_total_packets_sent, ip_total_bytes_sent, \
+					ip_total_packets_received, ip_total_bytes_received, \
+					pckBytes);
+		} else {
+			printf("Blad odczytu statystyk\n\r");
+		}
+		tx_thread_sleep(100);	//1s
+	}
+	return;
+}
 /* USER CODE END 1 */
