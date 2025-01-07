@@ -444,10 +444,18 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
+
+
+//int16_t toneBuffer[384];		//wysla 384 probki (768 B w kazdej paczce)
+//								//192 probki kanal prawy
+//								//192 probki kanal lewy
+
 //2 kanaly po 2 bajty kazdy w ramce 48*4 probki (co 4 ms) = 48*2*2*4=768 bajty w paczce UDP
+
 #define AUDIO_TOTAL_BUF_SIZE	768*4
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//3072 bajtow
 volatile int8_t rd_enable = 0;
+extern I2S_HandleTypeDef hi2s3;
 void AddAudioData(UCHAR *stream, ULONG length)
 {
 	static uint32_t wr_ptr = 0;
@@ -466,17 +474,18 @@ void AddAudioData(UCHAR *stream, ULONG length)
 		if(wr_ptr >= (AUDIO_TOTAL_BUF_SIZE / 2U))
 		{
 			//I2S3_START
-			extern I2S_HandleTypeDef hi2s3;
-			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE);
+
+			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
 			rd_enable = 1U;
 		}
 	}
 }
 
-
+uint32_t dmaBufferPlay = 0;
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-	 BSP_LED_Toggle(LED_BLUE);
+	dmaBufferPlay++;
+	BSP_LED_Toggle(LED_BLUE);
 }
 
 
@@ -514,18 +523,35 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     printf("UDP Client listening on PORT %d.. \n", DEFAULT_PORT);
   }
 
-  uint32_t packetRxCnt = 0;
+  //uint32_t packetRxCnt = 0;
+  uint32_t pxPtr = 0;
+  uint8_t dmaStart = 0;
   while(1)
   {
-    TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
+    //TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
 
-    /* wait for data for 500 msec */
-    ret = nx_udp_socket_receive(&UDPSocket, &data_packet, 50);
+    /* wait for data for 100 msec */
+    ret = nx_udp_socket_receive(&UDPSocket, &data_packet, 10);
 
     if (ret == NX_SUCCESS)
     {
       /* data is available, read it into the data buffer */
-      nx_packet_data_retrieve(data_packet, data_buffer, &bytes_read);
+      //nx_packet_data_retrieve(data_packet, data_buffer, &bytes_read);
+
+      nx_packet_data_retrieve(data_packet, &audioBuff[pxPtr], &bytes_read);
+      pxPtr += bytes_read;
+      if(pxPtr > (AUDIO_TOTAL_BUF_SIZE - 768))
+      {
+    	  pxPtr = 0;
+      }
+      if(dmaStart == 0)
+      {
+    	  if(pxPtr >= (AUDIO_TOTAL_BUF_SIZE /2) )
+    	  {
+    		  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
+    		  dmaStart = 1;
+    	  }
+      }
       /* get info about the client address and port */
       nx_udp_source_extract(data_packet, &source_ip_address, &source_port);
       /* print the client address, the remote port and the received data */
@@ -534,16 +560,26 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
       /* resend the same packet to the client */
       //ret =  nx_udp_socket_send(&UDPSocket, data_packet, source_ip_address, source_port);
 
-      AddAudioData(data_packet, bytes_read);
       nx_packet_release(data_packet);
       /* toggle the green led to monitor visually the traffic */
       //printf("%.5ld: Packet recv: %ld bytes\n\r",packetRxCnt++,bytes_read);
+
+      BSP_LED_Off(LED_RED);
       BSP_LED_Toggle(LED_GREEN);
     }
     else
     {
-        /* the server is in idle state, toggle the green led */
-        BSP_LED_Toggle(LED_RED);
+    	/* the server is in idle state, toggle the green led */
+    	if(dmaStart == 1)
+    	{
+    		HAL_I2S_DMAStop(&hi2s3);
+    		dmaStart = 0;
+    	}
+    	pxPtr = 0;
+
+    	BSP_LED_Off(LED_GREEN);
+    	BSP_LED_Off(LED_BLUE);
+    	BSP_LED_Toggle(LED_RED);
     }
   }
 }
@@ -579,10 +615,11 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 			}
 			pckRx = ip_total_packets_received;
 			bytRx = ip_total_bytes_received;
-			printf("PckTx: %ld  BytTx: %ld  PckRx: %ld  BytRx:%ld  Byt/Pck:%ld\n\r", \
+			printf("PckTx: %ld  BytTx: %ld  PckRx: %ld  BytRx:%ld  Byt/Pck:%ld  ", \
 					ip_total_packets_sent, ip_total_bytes_sent, \
 					ip_total_packets_received, ip_total_bytes_received, \
 					pckBytes);
+			printf("DMA: %ld\n\r",dmaBufferPlay);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
