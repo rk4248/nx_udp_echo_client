@@ -456,30 +456,29 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//3072 bajtow
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
-void AddAudioData(UCHAR *stream, ULONG length)
-{
-	static uint32_t wr_ptr = 0;
-	//static uint32_t rd_ptr = 0;
-	if(length)
-	{
-		wr_ptr += length;
-		if(wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
-		{
-			wr_ptr =0;
-		}
-	}
-
-	if(rd_enable == 0U)
-	{
-		if(wr_ptr >= (AUDIO_TOTAL_BUF_SIZE / 2U))
-		{
-			//I2S3_START
-
-			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
-			rd_enable = 1U;
-		}
-	}
-}
+//void AddAudioData(UCHAR *stream, ULONG length)
+//{
+//	static uint32_t wr_ptr = 0;
+//	//static uint32_t rd_ptr = 0;
+//	if(length)
+//	{
+//		wr_ptr += length;
+//		if(wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
+//		{
+//			wr_ptr =0;
+//		}
+//	}
+//
+//	if(rd_enable == 0U)
+//	{
+//		if(wr_ptr >= (AUDIO_TOTAL_BUF_SIZE / 2U))
+//		{
+//			//I2S3_START
+//			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 4);
+//			rd_enable = 1U;
+//		}
+//	}
+//}
 
 uint32_t dmaBufferPlay = 0;
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
@@ -536,34 +535,33 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     if (ret == NX_SUCCESS)
     {
       /* data is available, read it into the data buffer */
-      //nx_packet_data_retrieve(data_packet, data_buffer, &bytes_read);
+      nx_packet_data_retrieve(data_packet, &data_buffer[0], &bytes_read);
 
-      nx_packet_data_retrieve(data_packet, &audioBuff[pxPtr], &bytes_read);
-      pxPtr += bytes_read;
-      if(pxPtr > (AUDIO_TOTAL_BUF_SIZE - 768))
+      if(bytes_read)
       {
-    	  pxPtr = 0;
-      }
-      if(dmaStart == 0)
-      {
-    	  if(pxPtr >= (AUDIO_TOTAL_BUF_SIZE /2) )
+    	  for(uint16_t n=0;n<bytes_read/2;n++)
     	  {
-    		  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
-    		  dmaStart = 1;
+    		  audioBuff[pxPtr + 0] = data_buffer[0+n*2];
+    		  audioBuff[pxPtr + 1] = data_buffer[1+n*2];
+    		  audioBuff[pxPtr + 2] = 0;
+    		  audioBuff[pxPtr + 3] = 0;
+    		  pxPtr += 4;
+    	  }
+    	  if(pxPtr >= AUDIO_TOTAL_BUF_SIZE)
+    	  {
+    		pxPtr = 0;
+    	  }
+
+    	  if(dmaStart == 0)
+    	  {
+    		  if(pxPtr >= (AUDIO_TOTAL_BUF_SIZE /2) )
+    		  {
+    			  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
+    			  dmaStart = 1;
+    		  }
     	  }
       }
-      /* get info about the client address and port */
-      nx_udp_source_extract(data_packet, &source_ip_address, &source_port);
-      /* print the client address, the remote port and the received data */
-      //PRINT_DATA(source_ip_address, source_port, data_buffer);
-
-      /* resend the same packet to the client */
-      //ret =  nx_udp_socket_send(&UDPSocket, data_packet, source_ip_address, source_port);
-
       nx_packet_release(data_packet);
-      /* toggle the green led to monitor visually the traffic */
-      //printf("%.5ld: Packet recv: %ld bytes\n\r",packetRxCnt++,bytes_read);
-
       BSP_LED_Off(LED_RED);
       BSP_LED_Toggle(LED_GREEN);
     }
