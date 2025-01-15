@@ -444,13 +444,13 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-#define AUDIO_TOTAL_BUF_SIZE	768*2*16
+#define AUDIO_TOTAL_BUF_SIZE	48*2*16
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
 
 uint32_t dmaBufferPlay = 0;
-uint32_t ethSamples = 0;
+uint32_t ethSamples = 0, ethSamplesStart = 0;
 uint32_t i2sSamples = 0;
 
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
@@ -529,6 +529,7 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     		  {
     			  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
     			  dmaStart = 1;
+    			  ethSamplesStart = ethSamples;
     		  }
     	  }
       }
@@ -589,7 +590,7 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 					ip_total_packets_received, ip_total_bytes_received, \
 					pckBytes);
 			//printf("DMA: %ld\n\r",dmaBufferPlay);
-			printf("ETH:%ld I2S:%ld E-I:%ld\n\r",ethSamples,i2sSamples, ethSamples-i2sSamples);
+			printf("ETH:%ld I2S:%ld E-I:%ld\n\r",ethSamplesStart,i2sSamples, ethSamples-i2sSamples);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
