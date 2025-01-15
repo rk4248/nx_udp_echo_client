@@ -444,51 +444,21 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-
-
-//int16_t toneBuffer[384];		//wysla 384 probki (768 B w kazdej paczce)
-//								//192 probki kanal prawy
-//								//192 probki kanal lewy
-
-//2 kanaly po 2 bajty kazdy w ramce 48*4 probki (co 4 ms) = 48*2*2*4=768 bajty w paczce UDP
-
-#define AUDIO_TOTAL_BUF_SIZE	768*4
-uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//3072 bajtow
+#define AUDIO_TOTAL_BUF_SIZE	768*2*16
+uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
-//void AddAudioData(UCHAR *stream, ULONG length)
-//{
-//	static uint32_t wr_ptr = 0;
-//	//static uint32_t rd_ptr = 0;
-//	if(length)
-//	{
-//		wr_ptr += length;
-//		if(wr_ptr >= AUDIO_TOTAL_BUF_SIZE)
-//		{
-//			wr_ptr =0;
-//		}
-//	}
-//
-//	if(rd_enable == 0U)
-//	{
-//		if(wr_ptr >= (AUDIO_TOTAL_BUF_SIZE / 2U))
-//		{
-//			//I2S3_START
-//			HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 4);
-//			rd_enable = 1U;
-//		}
-//	}
-//}
 
 uint32_t dmaBufferPlay = 0;
+uint32_t ethSamples = 0;
+uint32_t i2sSamples = 0;
+
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
+	i2sSamples += AUDIO_TOTAL_BUF_SIZE/4;
 	dmaBufferPlay++;
 	BSP_LED_Toggle(LED_BLUE);
 }
-
-
-
 
 
 UCHAR data_buffer[1500];
@@ -546,6 +516,7 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     		  audioBuff[pxPtr + 2] = 0;
     		  audioBuff[pxPtr + 3] = 0;
     		  pxPtr += 4;
+    		  ethSamples++;
     	  }
     	  if(pxPtr >= AUDIO_TOTAL_BUF_SIZE)
     	  {
@@ -613,11 +584,12 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 			}
 			pckRx = ip_total_packets_received;
 			bytRx = ip_total_bytes_received;
-			printf("PckTx: %ld  BytTx: %ld  PckRx: %ld  BytRx:%ld  Byt/Pck:%ld  ", \
+			printf("PTx:%ld  BTx:%ld  PRx:%ld  BRx:%ld  B/P:%ld  ", \
 					ip_total_packets_sent, ip_total_bytes_sent, \
 					ip_total_packets_received, ip_total_bytes_received, \
 					pckBytes);
-			printf("DMA: %ld\n\r",dmaBufferPlay);
+			//printf("DMA: %ld\n\r",dmaBufferPlay);
+			printf("ETH:%ld I2S:%ld E-I:%ld\n\r",ethSamples,i2sSamples, ethSamples-i2sSamples);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
