@@ -1,6 +1,6 @@
 ################################################################################
 # Automatically-generated file. Do not edit!
-# Toolchain: GNU Tools for STM32 (11.3.rel1)
+# Toolchain: GNU Tools for STM32 (12.3.rel1)
 ################################################################################
 
 -include ../makefile.init
@@ -70,8 +70,8 @@ all: main-build
 main-build: Nx_UDP_Echo_Client.elf secondary-outputs
 
 # Tool invocations
-Nx_UDP_Echo_Client.elf Nx_UDP_Echo_Client.map: $(OBJS) $(USER_OBJS) C:\Users\roman\STM32CubeIDE\workspace_1.14.0\nx_udp_echo_client\STM32CubeIDE\STM32F429ZITX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Nx_UDP_Echo_Client.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\roman\STM32CubeIDE\workspace_1.14.0\nx_udp_echo_client\STM32CubeIDE\STM32F429ZITX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Nx_UDP_Echo_Client.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Nx_UDP_Echo_Client.elf Nx_UDP_Echo_Client.map: $(OBJS) $(USER_OBJS) E:\ST\workspace_1.16.0\Nx_UDP_Echo_Client\STM32CubeIDE\STM32F429ZITX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Nx_UDP_Echo_Client.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"E:\ST\workspace_1.16.0\Nx_UDP_Echo_Client\STM32CubeIDE\STM32F429ZITX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Nx_UDP_Echo_Client.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

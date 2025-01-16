@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "nx_stm32_eth_config.h"
+#include "main.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +60,9 @@ ULONG IpAddress;
 ULONG NetMask;
 
 CHAR *pointer;
+
+extern TIM_HandleTypeDef htim7;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -444,24 +448,54 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-#define AUDIO_TOTAL_BUF_SIZE	48*2*16
+#define AUDIO_TOTAL_BUF_SIZE	48*4*8		//48 probki (kazda probka 4 bajty zajmuje w odbiorniku, 8 bufory = 384 probki 48kHz w buforze )
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
 
-uint32_t dmaBufferPlay = 0;
 uint32_t ethSamples = 0, ethSamplesStart = 0;
 uint32_t i2sSamples = 0;
 
-void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+uint32_t ethSamplesMig;
+
+
+
+volatile uint16_t timeI2S    = 0;
+volatile uint16_t timeBuffor = 0;
+int16_t offsetTime = 0;
+int16_t offsetTimeAvg = 0;
+
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-	i2sSamples += AUDIO_TOTAL_BUF_SIZE/4;
-	dmaBufferPlay++;
+	timeI2S = htim7.Instance->CNT;
+	offsetTime = timeI2S - timeBuffor;
+
+	if(offsetTime < -8000)
+		offsetTime += 8000;
+	if(offsetTime > 8000)
+		offsetTime -= 8000;
+
+	offsetTimeAvg = offsetTimeAvg + (offsetTime - offsetTimeAvg) / 128;
+
+
 	BSP_LED_Toggle(LED_BLUE);
 }
 
 
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+
+	i2sSamples += AUDIO_TOTAL_BUF_SIZE/4;
+
+	ethSamplesMig = ethSamples;
+
+}
+
+
 UCHAR data_buffer[1500];
+uint16_t t1=0,t2=0,dt;
+
+
 static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 {
   UINT ret;
@@ -471,6 +505,8 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 
   ULONG source_ip_address;
   NX_PACKET *data_packet;
+
+
 
   /* create the UDP socket */
   ret = nx_udp_socket_create(&IpInstance, &UDPSocket, "UDP Client Socket", NX_IP_NORMAL, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, QUEUE_MAX_SIZE);
@@ -492,9 +528,19 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     printf("UDP Client listening on PORT %d.. \n", DEFAULT_PORT);
   }
 
+  HAL_TIM_Base_Start(&htim7);
   //uint32_t packetRxCnt = 0;
   uint32_t pxPtr = 0;
   uint8_t dmaStart = 0;
+  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, (AUDIO_TOTAL_BUF_SIZE / 2) );
+  HAL_I2S_DMAPause(&hi2s3);
+
+  uint16_t trash = 0;
+
+  pxPtr = 0;
+  ethSamples = 0;
+  i2sSamples = 0;
+ // __HAL_RCC_PLLI2S_CONFIG(193 , 5);
   while(1)
   {
     //TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
@@ -504,11 +550,28 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 
     if (ret == NX_SUCCESS)
     {
+    	t2 = t1;
+    	t1 = htim7.Instance->CNT;
+    	/* Lock the mutex. */
+
+    	dt = t1-t2;
+    	/* Unlock the mutex. */
+
+
+
       /* data is available, read it into the data buffer */
       nx_packet_data_retrieve(data_packet, &data_buffer[0], &bytes_read);
 
+      if(trash < 3000)
+      {
+    	  trash++;
+    	  bytes_read = 0;
+      }
+
       if(bytes_read)
       {
+    	  //BSP_LED_Off(LED_RED);
+    	  BSP_LED_Toggle(LED_GREEN);
     	  for(uint16_t n=0;n<bytes_read/2;n++)
     	  {
     		  audioBuff[pxPtr + 0] = data_buffer[0+n*2];
@@ -517,38 +580,44 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     		  audioBuff[pxPtr + 3] = 0;
     		  pxPtr += 4;
     		  ethSamples++;
-    	  }
-    	  if(pxPtr >= AUDIO_TOTAL_BUF_SIZE)
-    	  {
-    		pxPtr = 0;
-    	  }
 
-    	  if(dmaStart == 0)
-    	  {
-    		  if(pxPtr >= (AUDIO_TOTAL_BUF_SIZE /2) )
+    		  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
     		  {
-    			  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
-    			  dmaStart = 1;
-    			  ethSamplesStart = ethSamples;
+    			  timeBuffor = t1;
+    			  pxPtr = 0;
+    			  BSP_LED_Toggle(LED_RED);
     		  }
+
+    		  if(pxPtr == (AUDIO_TOTAL_BUF_SIZE/2) )
+    		  {
+    			  if(dmaStart == 0)
+    			  {
+    				  //HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
+    				  HAL_I2S_DMAResume(&hi2s3);
+    				  dmaStart = 1;
+    				  ethSamplesStart = ethSamples;
+    				  i2sSamples = 0;
+    			  }
+    		  }
+
     	  }
       }
       nx_packet_release(data_packet);
-      BSP_LED_Off(LED_RED);
-      BSP_LED_Toggle(LED_GREEN);
+
     }
     else
     {
     	/* the server is in idle state, toggle the green led */
     	if(dmaStart == 1)
     	{
-    		HAL_I2S_DMAStop(&hi2s3);
+    		//HAL_I2S_DMAStop(&hi2s3);
+    		 HAL_I2S_DMAPause(&hi2s3);
     		dmaStart = 0;
     	}
     	pxPtr = 0;
+    	ethSamples = 0;
 
     	BSP_LED_Off(LED_GREEN);
-    	BSP_LED_Off(LED_BLUE);
     	BSP_LED_Toggle(LED_RED);
     }
   }
@@ -585,16 +654,19 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 			}
 			pckRx = ip_total_packets_received;
 			bytRx = ip_total_bytes_received;
-			printf("PTx:%ld  BTx:%ld  PRx:%ld  BRx:%ld  B/P:%ld  ", \
-					ip_total_packets_sent, ip_total_bytes_sent, \
-					ip_total_packets_received, ip_total_bytes_received, \
-					pckBytes);
+//			printf("PTx:%ld  BTx:%ld  PRx:%ld  BRx:%ld  B/P:%ld  ", \
+//					ip_total_packets_sent, ip_total_bytes_sent, \
+//					ip_total_packets_received, ip_total_bytes_received, \
+//					pckBytes);
 			//printf("DMA: %ld\n\r",dmaBufferPlay);
-			printf("ETH:%ld I2S:%ld E-I:%ld\n\r",ethSamplesStart,i2sSamples, ethSamples-i2sSamples);
+
+			printf("ETH:%ld I2S:%ld E-I:%ld ",ethSamples,i2sSamples, ethSamplesMig-i2sSamples);
+			//printf("ETH:%ld I2S:%ld E-I:%ld ",ethBufferPlay,dmaBufferPlay, ethSamples-i2sSamples);
+			printf("T2-T1: %d dT: %d adT: %d us\r\n", dt, offsetTime,offsetTimeAvg);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
-		tx_thread_sleep(100);	//1s
+		tx_thread_sleep(50);	//0.5s
 	}
 	return;
 }
