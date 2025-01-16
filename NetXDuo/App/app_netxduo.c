@@ -506,6 +506,7 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
   ULONG source_ip_address;
   NX_PACKET *data_packet;
 
+  ULONG decymationFactor = 0;
 
 
   /* create the UDP socket */
@@ -581,11 +582,30 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
     		  pxPtr += 4;
     		  ethSamples++;
 
+    		  decymationFactor++;
+    		  //if( (pxPtr != AUDIO_TOTAL_BUF_SIZE) && (pxPtr != (AUDIO_TOTAL_BUF_SIZE/2))) {
+    		  if(decymationFactor == (1000000 / 5))
+    		  {
+    			  BSP_LED_Toggle(LED_RED);
+    			  decymationFactor = 0;
+    			  pxPtr-=4;
+    			  /*
+    				  decymationFactor = 0;
+    				  audioBuff[pxPtr + 0] = audioBuff[pxPtr - 4];
+    				  audioBuff[pxPtr + 1] = audioBuff[pxPtr - 3];
+    				  audioBuff[pxPtr + 2] = 0;
+    				  audioBuff[pxPtr + 3] = 0;
+    				  pxPtr += 4;
+    			   */
+
+    		  }
+    		  //}
+
     		  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
     		  {
     			  timeBuffor = t1;
     			  pxPtr = 0;
-    			  BSP_LED_Toggle(LED_RED);
+    			 // BSP_LED_Toggle(LED_RED);
     		  }
 
     		  if(pxPtr == (AUDIO_TOTAL_BUF_SIZE/2) )
