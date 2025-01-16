@@ -448,7 +448,7 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-#define AUDIO_TOTAL_BUF_SIZE	48*4*8		//48 probki (kazda probka 4 bajty zajmuje w odbiorniku, 8 bufory = 384 probki 48kHz w buforze )
+#define AUDIO_TOTAL_BUF_SIZE	48*4*16		//48 probki (kazda probka 4 bajty zajmuje w odbiorniku, 16 bufory = 768 probki (48kHz -> 16ms) w buforze )
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
@@ -666,7 +666,7 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
-		tx_thread_sleep(50);	//0.5s
+		tx_thread_sleep(100);	//1s
 	}
 	return;
 }
