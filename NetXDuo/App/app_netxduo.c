@@ -448,7 +448,7 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
   }
 }
 
-#define AUDIO_TOTAL_BUF_SIZE	48*4*16		//48 probki (kazda probka 4 bajty zajmuje w odbiorniku, 16 bufory = 768 probki (48kHz -> 16ms) w buforze )
+#define AUDIO_TOTAL_BUF_SIZE	48*4*32		//48 probki (kazda probka zajmuje w odbiorniku 4 bajty, 32 bufory = 768*2 probki (48kHz -> 32ms) w buforze )
 uint8_t audioBuff[AUDIO_TOTAL_BUF_SIZE];	//
 volatile int8_t rd_enable = 0;
 extern I2S_HandleTypeDef hi2s3;
@@ -456,45 +456,31 @@ extern I2S_HandleTypeDef hi2s3;
 uint32_t ethSamples = 0, ethSamplesStart = 0;
 uint32_t i2sSamples = 0;
 
-uint32_t ethSamplesMig;
-
-
-
-volatile uint16_t timeI2S    = 0;
-volatile uint16_t timeBuffor = 0;
-int16_t offsetTime = 0;
-int16_t offsetTimeAvg = 0;
+volatile uint16_t i2s_halfTime  = 0;
+volatile uint16_t i2s_period  = 0;
+volatile uint16_t i2s_lastTime  = 0;
+volatile uint16_t eth_fullTime  = 0;
+volatile uint16_t eth_period    = 0;
+volatile uint16_t eth_lastTime  = 0;
+volatile int16_t  eth_i2s        = 0;
 
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-	timeI2S = htim7.Instance->CNT;
-	offsetTime = timeI2S - timeBuffor;
 
-	if(offsetTime < -8000)
-		offsetTime += 8000;
-	if(offsetTime > 8000)
-		offsetTime -= 8000;
 
-	offsetTimeAvg = offsetTimeAvg + (offsetTime - offsetTimeAvg) / 128;
-
+	i2s_halfTime = htim7.Instance->CNT;
+	i2s_period   = i2s_halfTime - i2s_lastTime;
+	i2s_lastTime = i2s_halfTime;
 
 	BSP_LED_Toggle(LED_BLUE);
 }
 
-
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-
 	i2sSamples += AUDIO_TOTAL_BUF_SIZE/4;
-
-	ethSamplesMig = ethSamples;
-
 }
 
-
-UCHAR data_buffer[1500];
-uint16_t t1=0,t2=0,dt;
-
+UCHAR data_buffer[1536];
 
 static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 {
@@ -502,12 +488,12 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
   ULONG bytes_read;
   UINT source_port;
 
-
   ULONG source_ip_address;
   NX_PACKET *data_packet;
 
   ULONG decymationFactor = 0;
 
+  uint16_t time;
 
   /* create the UDP socket */
   ret = nx_udp_socket_create(&IpInstance, &UDPSocket, "UDP Client Socket", NX_IP_NORMAL, NX_FRAGMENT_OKAY, NX_IP_TIME_TO_LIVE, QUEUE_MAX_SIZE);
@@ -537,109 +523,109 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
   HAL_I2S_DMAPause(&hi2s3);
 
   uint16_t trash = 0;
-
+  uint16_t tempFlag = 0;
   pxPtr = 0;
   ethSamples = 0;
   i2sSamples = 0;
- // __HAL_RCC_PLLI2S_CONFIG(193 , 5);
+
   while(1)
   {
-    //TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
+	  /* wait for data for 100 msec */
+	  ret = nx_udp_socket_receive(&UDPSocket, &data_packet, 10);
 
-    /* wait for data for 100 msec */
-    ret = nx_udp_socket_receive(&UDPSocket, &data_packet, 10);
+	  if (ret == NX_SUCCESS)
+	  {
+		  time = htim7.Instance->CNT;
+		  eth_period = time - eth_lastTime;
+		  eth_lastTime = time;
 
-    if (ret == NX_SUCCESS)
-    {
-    	t2 = t1;
-    	t1 = htim7.Instance->CNT;
-    	/* Lock the mutex. */
+		  /* data is available, read it into the data buffer */
+		  nx_packet_data_retrieve(data_packet, &data_buffer[0], &bytes_read);
 
-    	dt = t1-t2;
-    	/* Unlock the mutex. */
+		  if(trash < 500)
+		  {
+			  trash++;
+			  bytes_read = 0;
+		  }
 
+		  if(bytes_read)
+		  {
+			  //BSP_LED_Off(LED_RED);
+			  BSP_LED_Toggle(LED_GREEN);
+			  for(uint16_t n=0;n<bytes_read/2;n++)
+			  {
+				  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
+				  {
+					  pxPtr = 0;
+					  eth_fullTime = time;
+					  eth_i2s = eth_fullTime - i2s_halfTime;
+					  //BSP_LED_Toggle(LED_RED);
+					  if(eth_i2s < 7000)
+					  {
+						  tempFlag = 1;
+					  } else
+					  {
+						  tempFlag = 0;
+					  }
+				  }
 
+				  audioBuff[pxPtr + 0] = data_buffer[0+n*2];
+				  audioBuff[pxPtr + 1] = data_buffer[1+n*2];
+				  audioBuff[pxPtr + 2] = 0;
+				  audioBuff[pxPtr + 3] = 0;
+				  pxPtr += 4;
+				  ethSamples++;
 
-      /* data is available, read it into the data buffer */
-      nx_packet_data_retrieve(data_packet, &data_buffer[0], &bytes_read);
-
-      if(trash < 3000)
-      {
-    	  trash++;
-    	  bytes_read = 0;
-      }
-
-      if(bytes_read)
-      {
-    	  //BSP_LED_Off(LED_RED);
-    	  BSP_LED_Toggle(LED_GREEN);
-    	  for(uint16_t n=0;n<bytes_read/2;n++)
-    	  {
-    		  audioBuff[pxPtr + 0] = data_buffer[0+n*2];
-    		  audioBuff[pxPtr + 1] = data_buffer[1+n*2];
-    		  audioBuff[pxPtr + 2] = 0;
-    		  audioBuff[pxPtr + 3] = 0;
-    		  pxPtr += 4;
-    		  ethSamples++;
-
-    		  decymationFactor++;
-    		  //if( (pxPtr != AUDIO_TOTAL_BUF_SIZE) && (pxPtr != (AUDIO_TOTAL_BUF_SIZE/2))) {
-    		  if(decymationFactor == (1000000 / 5))
-    		  {
-    			  BSP_LED_Toggle(LED_RED);
-    			  decymationFactor = 0;
-    			  pxPtr-=4;
-    			  /*
-    				  decymationFactor = 0;
+				  decymationFactor++;
+				  if(decymationFactor == (1000000 / 40))
+				  {
+					  decymationFactor = 0;
+					  if(tempFlag == 1)
+					  {
+						  pxPtr-=4;
+						  tempFlag = 0;
+						  BSP_LED_Toggle(LED_RED);
+					  }
+					  /*
     				  audioBuff[pxPtr + 0] = audioBuff[pxPtr - 4];
     				  audioBuff[pxPtr + 1] = audioBuff[pxPtr - 3];
     				  audioBuff[pxPtr + 2] = 0;
     				  audioBuff[pxPtr + 3] = 0;
     				  pxPtr += 4;
-    			   */
+					   */
+				  }
 
-    		  }
-    		  //}
+				  if(pxPtr == (AUDIO_TOTAL_BUF_SIZE/2) )
+				  {
+					  if(dmaStart == 0)
+					  {
+						  //HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
+						  HAL_I2S_DMAResume(&hi2s3);
+						  dmaStart = 1;
+						  ethSamplesStart = ethSamples;
+						  i2sSamples = 0;
+					  }
+				  }
 
-    		  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
-    		  {
-    			  timeBuffor = t1;
-    			  pxPtr = 0;
-    			 // BSP_LED_Toggle(LED_RED);
-    		  }
+			  }
+		  }
+		  nx_packet_release(data_packet);
 
-    		  if(pxPtr == (AUDIO_TOTAL_BUF_SIZE/2) )
-    		  {
-    			  if(dmaStart == 0)
-    			  {
-    				  //HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
-    				  HAL_I2S_DMAResume(&hi2s3);
-    				  dmaStart = 1;
-    				  ethSamplesStart = ethSamples;
-    				  i2sSamples = 0;
-    			  }
-    		  }
-
-    	  }
-      }
-      nx_packet_release(data_packet);
-
-    }
-    else
-    {
-    	/* the server is in idle state, toggle the green led */
-    	if(dmaStart == 1)
-    	{
-    		//HAL_I2S_DMAStop(&hi2s3);
-    		 HAL_I2S_DMAPause(&hi2s3);
-    		dmaStart = 0;
-    	}
-    	pxPtr = 0;
-    	ethSamples = 0;
-
-    	BSP_LED_Off(LED_GREEN);
-    	BSP_LED_Toggle(LED_RED);
-    }
+	  }
+	  else
+	  {
+		  /* the server is in idle state, toggle the green led */
+		  if(dmaStart == 1)
+		  {
+			  //HAL_I2S_DMAStop(&hi2s3);
+			  HAL_I2S_DMAPause(&hi2s3);
+			  dmaStart = 0;
+		  }
+		  pxPtr = 0;
+		  ethSamples = 0;
+		  BSP_LED_Off(LED_GREEN);
+		  BSP_LED_Toggle(LED_RED);
+	  }
   }
 }
 
@@ -680,13 +666,13 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 //					pckBytes);
 			//printf("DMA: %ld\n\r",dmaBufferPlay);
 
-			printf("ETH:%ld I2S:%ld E-I:%ld ",ethSamples,i2sSamples, ethSamplesMig-i2sSamples);
+			printf("ETH:%ld I2S:%ld ",ethSamplesStart,i2sSamples);
 			//printf("ETH:%ld I2S:%ld E-I:%ld ",ethBufferPlay,dmaBufferPlay, ethSamples-i2sSamples);
-			printf("T2-T1: %d dT: %d adT: %d us\r\n", dt, offsetTime,offsetTimeAvg);
+			printf("I2SPeriod: %d EthPeriod:%d ETHI2S:%d\r\n", i2s_period, eth_period, eth_i2s);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
-		tx_thread_sleep(100);	//1s
+		tx_thread_sleep(50);	//0.5s
 	}
 	return;
 }
