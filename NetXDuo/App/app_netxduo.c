@@ -457,26 +457,21 @@ uint32_t ethSamples = 0, ethSamplesStart = 0;
 uint32_t i2sSamples = 0;
 
 volatile uint16_t i2s_halfTime  = 0;
-volatile uint16_t i2s_period  = 0;
-volatile uint16_t i2s_lastTime  = 0;
 volatile uint16_t eth_fullTime  = 0;
 volatile uint16_t eth_period    = 0;
 volatile uint16_t eth_lastTime  = 0;
-volatile int16_t  eth_i2s        = 0;
+volatile int16_t  eth_i2s       = 0;
 
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
-
-
 	i2s_halfTime = htim7.Instance->CNT;
-	i2s_period   = i2s_halfTime - i2s_lastTime;
-	i2s_lastTime = i2s_halfTime;
-
 	BSP_LED_Toggle(LED_BLUE);
 }
 
+
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s)
 {
+	eth_i2s = eth_fullTime - i2s_halfTime;
 	i2sSamples += AUDIO_TOTAL_BUF_SIZE/4;
 }
 
@@ -519,8 +514,9 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
   //uint32_t packetRxCnt = 0;
   uint32_t pxPtr = 0;
   uint8_t dmaStart = 0;
-  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, (AUDIO_TOTAL_BUF_SIZE / 2) );
-  HAL_I2S_DMAPause(&hi2s3);
+
+  //HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, (AUDIO_TOTAL_BUF_SIZE / 2) );
+ // HAL_I2S_DMAPause(&hi2s3);
 
   uint16_t trash = 0;
   uint16_t tempFlag = 0;
@@ -554,53 +550,56 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 			  BSP_LED_Toggle(LED_GREEN);
 			  for(uint16_t n=0;n<bytes_read/2;n++)
 			  {
-				  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
-				  {
-					  pxPtr = 0;
-					  eth_fullTime = time;
-					  eth_i2s = eth_fullTime - i2s_halfTime;
-					  //BSP_LED_Toggle(LED_RED);
-					  if(eth_i2s < 7000)
-					  {
-						  tempFlag = 1;
-					  } else
-					  {
-						  tempFlag = 0;
-					  }
-				  }
 
 				  audioBuff[pxPtr + 0] = data_buffer[0+n*2];
 				  audioBuff[pxPtr + 1] = data_buffer[1+n*2];
 				  audioBuff[pxPtr + 2] = 0;
 				  audioBuff[pxPtr + 3] = 0;
 				  pxPtr += 4;
+				  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
+				  {
+					  pxPtr = 0;
+					  eth_fullTime = time;
+				  }
+
+
 				  ethSamples++;
 
 				  decymationFactor++;
-				  if(decymationFactor == (1000000 / 40))
+				  if(decymationFactor == (1000000 / 500))
 				  {
-					  decymationFactor = 0;
-					  if(tempFlag == 1)
+					  //eth_i2s < 0  - eth przychodzi szybcjiej niz gra i2s
+					  if(eth_i2s < -5000)
 					  {
-						  pxPtr-=4;
-						  tempFlag = 0;
+						  if(pxPtr >= 4)
+						  {
+							  pxPtr -= 4;
+						  } else {
+							  pxPtr = AUDIO_TOTAL_BUF_SIZE - 4;
+						  }
 						  BSP_LED_Toggle(LED_RED);
 					  }
-					  /*
-    				  audioBuff[pxPtr + 0] = audioBuff[pxPtr - 4];
-    				  audioBuff[pxPtr + 1] = audioBuff[pxPtr - 3];
-    				  audioBuff[pxPtr + 2] = 0;
-    				  audioBuff[pxPtr + 3] = 0;
-    				  pxPtr += 4;
-					   */
+
+					  //eth_i2s > 0 - rth przychodzi wolniej niz gra i2s
+					  if(eth_i2s > 5000)
+					  {
+						  pxPtr += 4;
+						  if(pxPtr == AUDIO_TOTAL_BUF_SIZE)
+						  {
+							  pxPtr = 0;
+						  }
+
+					  }
+					  decymationFactor = 0;
+
 				  }
 
 				  if(pxPtr == (AUDIO_TOTAL_BUF_SIZE/2) )
 				  {
 					  if(dmaStart == 0)
 					  {
-						  //HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
-						  HAL_I2S_DMAResume(&hi2s3);
+						  HAL_I2S_Transmit_DMA(&hi2s3, (uint16_t*)audioBuff, AUDIO_TOTAL_BUF_SIZE / 2);
+						  //HAL_I2S_DMAResume(&hi2s3);
 						  dmaStart = 1;
 						  ethSamplesStart = ethSamples;
 						  i2sSamples = 0;
@@ -617,12 +616,14 @@ static VOID App_UDP_Client_Thread_Entry(ULONG thread_input)
 		  /* the server is in idle state, toggle the green led */
 		  if(dmaStart == 1)
 		  {
-			  //HAL_I2S_DMAStop(&hi2s3);
-			  HAL_I2S_DMAPause(&hi2s3);
+			  HAL_I2S_DMAStop(&hi2s3);
+			  //HAL_I2S_DMAPause(&hi2s3);
 			  dmaStart = 0;
 		  }
 		  pxPtr = 0;
 		  ethSamples = 0;
+		  i2sSamples = 0;
+
 		  BSP_LED_Off(LED_GREEN);
 		  BSP_LED_Toggle(LED_RED);
 	  }
@@ -638,6 +639,7 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 	ULONG ip_total_fragments_sent, ip_total_fragments_received;
 
 	static ULONG pckRx = 0, bytRx = 0;
+	static ULONG cnt = 0;
 	ULONG pckBytes;
 	UINT ret;
 
@@ -666,13 +668,13 @@ void IP_Statiscitc_Thread(ULONG thread_input)
 //					pckBytes);
 			//printf("DMA: %ld\n\r",dmaBufferPlay);
 
-			printf("ETH:%ld I2S:%ld ",ethSamplesStart,i2sSamples);
+			printf("%.5ld: ETH:%ld I2S:%ld ",cnt++, ethSamples,i2sSamples);
 			//printf("ETH:%ld I2S:%ld E-I:%ld ",ethBufferPlay,dmaBufferPlay, ethSamples-i2sSamples);
-			printf("I2SPeriod: %d EthPeriod:%d ETHI2S:%d\r\n", i2s_period, eth_period, eth_i2s);
+			printf("EthPeriod:%d ETHI2S:%d\r\n", eth_period, eth_i2s);
 		} else {
 			printf("Blad odczytu statystyk\n\r");
 		}
-		tx_thread_sleep(50);	//0.5s
+		tx_thread_sleep(100);	//1s
 	}
 	return;
 }
